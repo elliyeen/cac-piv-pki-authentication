@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+.out/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Prisma
+prisma/migrations/.migration_lock.toml
+
+# Synthetic test fixtures are COMMITTED (they're generated, not secret)
+# test-fixtures/certs/*.pem  -- ALLOWED (synthetic)
+# test-fixtures/crls/*.pem   -- ALLOWED (synthetic)
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Profiling
+*.prof
+*.cpuprofile
+*.heapprofile
