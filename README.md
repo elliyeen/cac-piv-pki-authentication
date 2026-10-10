@@ -1,278 +1,116 @@
-# CAC/PIV PKI Authentication — Public Reference Implementation
-
-**Elliyeen LLC** | Forward Deployed Engineering | Cybersecurity & IAM Portfolio
+# CAC/PIV PKI Authentication: Reference Implementation
 
 [![CI](https://github.com/elliyeen/cac-piv-pki-authentication/actions/workflows/ci.yml/badge.svg)](https://github.com/elliyeen/cac-piv-pki-authentication/actions/workflows/ci.yml)
 [![Security](https://github.com/elliyeen/cac-piv-pki-authentication/actions/workflows/security.yml/badge.svg)](https://github.com/elliyeen/cac-piv-pki-authentication/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
----
+A clean-room TypeScript library and test suite for the application side of smart-card (CAC/PIV) authentication: validating X.509 certificate chains, checking revocation, trusting only headers that provably came from your load balancer, and managing sessions that can actually be revoked.
 
-## Overview
+> **This is a sanitized, educational reference built from public standards.** It uses synthetic certificates generated at run time with throwaway keys. It contains no customer data, no real certificates, and no restricted information. It is not a production system, has not been through any authorization process, and makes no claim about deployment in any government environment.
 
-This repository demonstrates Elliyeen's capabilities in **FDE (Forward Deployed Engineering), Cybersecurity, IAM, PKI, Architecture, and DevSecOps** through a clean-room reference implementation of CAC/PIV (Common Access Card / Personal Identity Verification) authentication with X.509 certificate validation.
+## Status
 
-> **⚠️ Important:** This is a **sanitized, educational reference implementation** built from public standards only. It contains no customer data, real certificates, internal infrastructure details, or proprietary logic. All identities, certificates, and infrastructure are synthetic.
+| Area | State |
+|---|---|
+| Certificate chain validation | **Implemented and tested** (synthetic PKI). Signature, validity, CA constraints, path length, client-auth EKU. |
+| CRL revocation | **Implemented and tested.** Signed-CRL parsing, cache with bounded staleness, fail-closed by default. |
+| Header provenance (mTLS / source IP) | **Implemented and tested.** IPv4 only. Signed-header method is not implemented and fails closed. |
+| Sessions (idle and absolute timeout, CSRF, revocation) | **Implemented and tested** against an in-memory store. |
+| OCSP | **Planned.** Not implemented. |
+| Web app, database, account linking, role mapping, audit logging | **Not in this repository.** Five tests for these are `it.todo`. |
+| Platform deployment (ALB / VDI) | **Described in ADRs only.** |
 
----
+Run `pnpm test` to see the current counts rather than trusting this table.
 
-## Capabilities Demonstrated
+## Try it (about five minutes)
 
-| Domain | Demonstrated In |
-|--------|-----------------|
-| **PKI / X.509** | Certificate chain validation, trust anchor management, CRL/OCSP revocation checking |
-| **CAC/PIV Authentication** | PIV-I certificate profile handling, EDIPI extraction, FASC-N parsing |
-| **Identity & Access** | Dual authentication (cert + password), session management, account linking |
-| **Architecture** | Zero-trust header-based identity propagation, trust boundary enforcement |
-| **Security Testing** | Negative test suites, red-team scenarios, STRIDE threat modeling |
-| **DevSecOps** | CI/CD with security gates (SAST, secret scan, dependency audit, container scan) |
-| **Compliance** | NIST 800-53 control mapping, STIG-aligned session controls |
-
----
-
-## Architecture (Generic)
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│  VDI /      │────▶│    ALB      │────▶│  Application │
-│  (CAC/PIV)  │     │  AppStream  │     │  (mTLS term)│     │  (Next.js)   │
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                           │                    │                    │
-                           │  Cert validation   │  Header injection  │  Header trust
-                           │  CRL/OCSP check    │  x-edipi, x-cert-* │  validation
-                           │  Revocation        │                    │  EDIPI extract
-                           └────────────────────┴────────────────────┘
-                                                          │
-                                                          ▼
-                                                 ┌─────────────┐
-                                                 │  Database   │
-                                                 │ (PostgreSQL)│
-                                                 └─────────────┘
-```
-
-**Trust Boundary:** Certificate validation and revocation checking occur at the VDI/AppStream/ALB layer. The application **trusts validated headers only** after verifying they originate from the trusted ALB (via mTLS between ALB→App, source IP validation, or signed headers).
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 20+ (LTS)
-- pnpm 9+
-- Docker (for local PostgreSQL)
-
-### Installation
+Prerequisites: Node.js 20+ and pnpm 9+. No database or Docker needed.
 
 ```bash
-# Clone and install
 git clone https://github.com/elliyeen/cac-piv-pki-authentication.git
-cd cac-piv-pki-authentication
+cd cac-piv-pki-authentication/reference-impl
 pnpm install
-
-# Start local database
-docker compose up -d postgres
-
-# Generate synthetic test certificates
-pnpm run certs:generate
-
-# Run development server
-pnpm dev
+pnpm typecheck
+pnpm test        # unit, security and certificate suites
+pnpm demo        # accept/reject walkthrough, fully offline
 ```
 
-### Testing
+`pnpm demo` generates a synthetic root, an intermediate and six cards, then validates each one:
+
+```
+ACCEPT  valid card
+REJECT  expired card                         - Certificate expired
+REJECT  revoked card (on CRL)                - Certificate revoked
+REJECT  card from untrusted issuer           - No path to a trusted anchor
+REJECT  forged card (right issuer name,      - No path to a trusted anchor
+        wrong key)
+REJECT  no client-auth usage                 - missing required EKU
+```
+
+To write the same material to disk for inspection with other tools:
 
 ```bash
-# All tests with coverage
-pnpm test:coverage
-
-# Unit tests only
-pnpm test:unit
-
-# Security-focused tests (negative, red-team)
-pnpm test:security
-
-# Certificate validation tests
-pnpm test:certs
+pnpm certs:generate   # writes ../test-fixtures/ (git-ignored)
+openssl verify -CAfile ../test-fixtures/certs/root-ca.pem \
+  -untrusted ../test-fixtures/certs/intermediate-ca.pem \
+  ../test-fixtures/certs/leaf-valid.pem
 ```
 
----
+OpenSSL agrees with the validator on the valid, expired and untrusted-issuer cases.
 
-## Repository Structure
+## Architecture
 
 ```
-.
-├── docs/                 # Documentation
-│   ├── ARCHITECTURE.md   # System architecture deep-dive
-│   ├── THREAT_MODEL.md   # STRIDE threat model
-│   ├── CONTROLS.md       # NIST 800-53 control mapping
-│   ├── ADR/              # Architecture Decision Records
-│   └── WALKTHROUGH.md    # 5-minute interview walkthrough
-├── reference-impl/       # Clean-room Next.js + Better Auth implementation
-│   ├── src/
-│   │   ├── lib/cac/      # CAC middleware, header parsing, validation
-│   │   ├── lib/certs/    # X.509 validation, CRL/OCSP client
-│   │   ├── lib/auth/     # Better Auth integration, session management
-│   │   └── app/          # Next.js App Router pages/api
-│   ├── prisma/           # Database schema (sanitized)
-│   └── package.json
-├── test-fixtures/        # Synthetic certificates & test data
-│   ├── certs/            # Generated PIV-I certs (valid, expired, revoked, malformed)
-│   ├── crls/             # Synthetic CRLs
-│   └── headers/          # Sample header payloads
-├── diagrams/             # Architecture diagrams (SVG/Mermaid)
-├── scripts/              # Operational scripts
-│   ├── generate-certs.ts # Synthetic certificate generation
-│   ├── fetch-crl.ts      # CRL fetching demo
-│   └── validate-chain.ts # Chain validation demo
-├── adr/                  # Architecture Decision Records
-│   ├── 0001-header-based-auth.md
-│   ├── 0002-crl-caching-strategy.md
-│   ├── 0003-session-timeout.md
-│   └── ...
-├── .github/workflows/    # CI/CD pipelines
-│   ├── ci.yml            # Lint, typecheck, test, build
-│   ├── security.yml      # SAST, secret scan, dependency audit
-│   └── deploy-preview.yml# Preview deployment
-└── LICENSE
+Client (CAC/PIV) -> VDI / ALB (terminates mTLS, validates the card) -> Application
+                                                                        |
+                          trusts x-edipi / x-cert-* headers ONLY if provenance checks pass
 ```
 
----
+The primary design (ADR-0001) puts certificate validation at the platform layer and has the application verify header provenance. The in-app chain validator exists for environments where the application must validate certificates itself.
 
-## Key Features
+### Trust boundary and fail-closed rules
 
-### Certificate Validation (`reference-impl/src/lib/certs/`)
+- If `requireMtls` is set, a request without a trusted ALB client certificate is rejected. It never falls through to IP matching.
+- If revocation checking is requested without a CRL client, validation fails.
+- If a CRL cannot be fetched and nothing usable is cached, the check errors (default) or, only when explicitly configured, passes.
+- A session cookie alone is not proof of a live session. The server-side store decides.
 
-- **Chain validation** — Root → Intermediate → Leaf with path length constraints
-- **Trust anchor management** — Configurable root CA store (DISA PKI simulated)
-- **CRL processing** — RFC 5280 compliant parsing, caching (24h TTL + stale-while-revalidate)
-- **OCSP fallback** — Nonce support, response validation, caching
-- **PIV-I profile validation** — Key usage, extended key usage, certificate policies
+## Layout
 
-### CAC Middleware (`reference-impl/src/lib/cac/`)
-
-- **Header trust validation** — Verify ALB source, mTLS validation, signature verification
-- **EDIPI extraction** — From `x-edipi` header or Subject Alternative Name parsing
-- **Certificate metadata parsing** — Subject DN, Issuer DN, serial, validity, thumbprint
-- **Session enforcement** — 15-min sliding window, CSRF protection, secure cookies
-- **Dual auth coordination** — CAC primary, password fallback for non-CAC accounts
-
-### Security Testing (`reference-impl/src/__tests__/security/`)
-
-| Test Suite | Scenarios |
-|------------|-----------|
-| **Negative Certificates** | Expired, not-yet-valid, revoked, self-signed, wrong EKU, path length exceeded |
-| **Revocation** | Valid CRL, stale CRL, CRL unreachable (fail-closed), OCSP failure |
-| **Header Spoofing** | Missing headers, forged EDIPI, mismatched cert/header, replay |
-| **Session Attacks** | Fixation, hijacking, IDOR, timeout bypass, concurrent session limits |
-| **Red Team (RT-01..RT-08)** | Mapped from delivery plan adversarial scenarios |
-
----
-
-## Architecture Decision Records
-
-| ADR | Title | Status |
-|-----|-------|--------|
-| [0001](adr/0001-header-based-auth.md) | Header-Based Identity Propagation vs In-App mTLS | ✅ Accepted |
-| [0002](adr/0002-crl-caching-strategy.md) | CRL Caching: 24h TTL + Stale-While-Revalidate | ✅ Accepted |
-| [0003](adr/0003-session-timeout.md) | 15-Minute Sliding Session Window (STIG V-259700) | ✅ Accepted |
-| [0004](adr/0004-dual-auth-scoping.md) | Password Fallback Scoped to Non-CAC Accounts Only | ✅ Accepted |
-| [0005](adr/0005-edipi-immutability.md) | EDIPI Immutable Once Bound to Account | ✅ Accepted |
-
----
-
-## Compliance Mapping (NIST 800-53 Rev 5)
-
-| Control | Implementation |
-|---------|----------------|
-| **IA-2** (Identification & Authentication) | CAC/PIV multi-factor via certificate + PIN |
-| **IA-5** (Authenticator Management) | Certificate lifecycle, revocation checking, rotation |
-| **SC-23** (Session Authenticity) | 15-min timeout, CSRF, secure flags, rotation |
-| **AU-2/AU-3** (Audit Events/Content) | Structured auth audit logs with correlation IDs |
-| **SC-12** (Cryptographic Key Establishment) | TLS 1.2+, certificate-based key exchange |
-| **CM-7** (Least Functionality) | Minimal header surface, fail-closed defaults |
-
----
-
-## CI/CD Pipeline
-
-```mermaid
-flowchart LR
-    A[Push/PR] --> B[Lint & Typecheck]
-    B --> C[Unit Tests]
-    C --> D[Security Tests]
-    D --> E[SAST Scan]
-    E --> F[Secret Scan]
-    F --> G[Dependency Audit]
-    G --> H[Build]
-    H --> I[Container Scan]
-    I --> J[Deploy Preview]
-    J --> K{Manual Approve}
-    K -->|Yes| L[Deploy Staging]
+```
+reference-impl/src/lib/certs/   chain-validator.ts, crl-client.ts
+reference-impl/src/lib/cac/     headers.ts, provenance.ts
+reference-impl/src/lib/auth/    session.ts
+reference-impl/src/testing/     synthetic-pki.ts (test and demo PKI)
+reference-impl/src/__tests__/   security/ (red-team), certs/
+scripts/                        demo.ts, generate-certs.ts
+adr/                            decision records
+docs/                           threat model, control mapping, walkthrough
 ```
 
-**Security Gates (all must pass):**
-- ✅ Zero critical/high SAST findings
-- ✅ Zero secrets detected
-- ✅ Zero critical CVEs in dependencies
-- ✅ Test coverage ≥ 80%
-- ✅ All security tests pass
+## Engineering decisions
 
----
+| ADR | Decision |
+|---|---|
+| [0001](adr/0001-header-based-auth.md) | Header-based identity propagation instead of in-app mTLS |
+| [0002](adr/0002-crl-caching-strategy.md) | CRL cache: 24h TTL, stale-while-revalidate, bounded staleness |
+| [0003](adr/0003-session-timeout.md) | 15-minute sliding session window |
 
-## 5-Minute Walkthrough
+## Known limitations
 
-See [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) for a timed interview-ready walkthrough covering:
-1. **Problem & Context** (30s)
-2. **Architecture & Trust Boundaries** (60s)
-3. **Certificate Validation Deep-Dive** (90s)
-4. **Security Testing & Red Teaming** (60s)
-5. **DevSecOps Pipeline** (30s)
-6. **Compliance & ATO Readiness** (30s)
+- No OCSP, name constraints, policy mapping or AIA chasing.
+- CRL signature verification happens only when the issuer certificate is supplied. The validator always supplies it.
+- The CRL cache is in memory. A multi-instance deployment needs a shared cache.
+- IPv6 source ranges are not supported.
+- The security tests marked `it.todo` need an application layer this repository does not have.
+- Documents under `docs/` other than the walkthrough describe design intent. Statuses in them are not verified against this code.
 
----
+## Security
 
-## Synthetic Certificate Generation
-
-All test certificates are generated at build time using `scripts/generate-certs.ts`:
-
-```bash
-# Generates in test-fixtures/certs/
-# - root-ca.pem           # Synthetic root CA
-# - intermediate-ca.pem   # Synthetic intermediate
-# - valid-piv.pem         # Valid PIV-I cert (EDIPI: 9999999999)
-# - expired-piv.pem       # Expired cert
-# - revoked-piv.pem       # Revoked cert (serial in test CRL)
-# - malformed-*.pem       # Various negative cases
-# - crl.pem               # Synthetic CRL with revoked serial
-```
-
-**No real certificates, keys, or PII are ever committed.**
-
----
-
-## Contributing
-
-This is a portfolio reference implementation. Issues/PRs welcome for:
-- Bug fixes in reference implementation
-- Additional test cases
-- Documentation improvements
-- Architecture discussion (via ADR proposals)
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
----
+CodeQL runs on pushes and pull requests. There is no secret scanning, container scanning or dependency audit configured in this repository's workflows today.
 
 ## License
 
-MIT License — See [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).
 
----
-
-## Contact
-
-**Elliyeen LLC** — Forward Deployed Engineering  
-🌐 https://elliyeen.com  
-📧 engineering@elliyeen.com  
-
-*This repository demonstrates capabilities for discussion purposes. Production deployments require customer-specific engineering, authorization, and ATO processes.*
+*This repository demonstrates engineering approach for discussion. A real deployment needs customer-specific requirements, review and authorization.*

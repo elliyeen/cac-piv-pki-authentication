@@ -48,44 +48,28 @@ This project follows the [Contributor Covenant Code of Conduct](https://www.cont
 
 - Node.js 20+ (LTS)
 - pnpm 9+
-- Docker (for local PostgreSQL)
-- Git
 
 ### Installation
 
 ```bash
 git clone https://github.com/elliyeen/cac-piv-pki-authentication.git
-cd cac-piv-pki-authentication
+cd cac-piv-pki-authentication/reference-impl
 pnpm install
-
-# Start local database
-docker compose up -d postgres
-
-# Generate synthetic test certificates
-pnpm run certs:generate
-
-# Run development server
-pnpm dev
+pnpm typecheck
+pnpm test
+pnpm demo
 ```
 
 ### Project Structure
 
 ```
-reference-impl/          # Next.js application
-├── src/
-│   ├── lib/
-│   │   ├── cac/         # CAC middleware, header parsing
-│   │   ├── certs/       # X.509 validation, CRL/OCSP
-│   │   └── auth/        # Better Auth integration
-│   └── app/             # Next.js App Router
-├── prisma/              # Database schema
-└── package.json
-
-test-fixtures/           # Synthetic test data (committed)
-scripts/                 # Operational scripts
-adr/                     # Architecture Decision Records
-docs/                    # Documentation
-.github/workflows/       # CI/CD pipelines
+reference-impl/src/lib/   certs/, cac/, auth/
+reference-impl/src/testing/   synthetic PKI helper
+reference-impl/src/__tests__/ security/, certs/
+scripts/                  demo and fixture generation
+adr/                      Architecture Decision Records
+docs/                     threat model, control mapping, walkthrough
+.github/workflows/        CI and CodeQL
 ```
 
 ---

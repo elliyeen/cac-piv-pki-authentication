@@ -1,5 +1,7 @@
 # STRIDE Threat Model
 
+> **Status: design intent, not verified evidence.** This threat model was written ahead of the code. Entries that reference Prisma schemas, a Next.js app, OCSP, audit logging or other artifacts are **planned**: they are not present in this repository. See the README status table for what is implemented and tested.
+
 **Elliyeen CAC/PIV PKI Authentication Reference Implementation**  
 **Methodology:** STRIDE per Microsoft Threat Modeling  
 **Scope:** Application layer only (platform threats owned by ALB/VDI)
