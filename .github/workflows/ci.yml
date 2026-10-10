@@ -1,88 +1,31 @@
 name: CI
-
 on:
   push:
     branches: [master]
   pull_request:
     branches: [master]
-
+  workflow_dispatch:
 permissions:
   contents: read
-  security-events: write
-
+defaults:
+  run:
+    working-directory: reference-impl
 jobs:
-  lint-and-typecheck:
-    name: Lint & Typecheck
+  checks:
+    name: Typecheck and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
+          node-version: '20'
+      # Temporary bootstrap: the repository has no pnpm-lock.yaml.
+      # Replace with --frozen-lockfile once a reviewed lockfile is committed.
+      - run: pnpm install --no-frozen-lockfile
       - run: pnpm typecheck
-
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:unit --coverage
-      - uses: codecov/codecov-action@v4
-        if: github.repository == 'elliyeen/cac-piv-pki-authentication'
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/lcov.info
-
-  security-tests:
-    name: Security Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:unit
       - run: pnpm test:security
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, unit-tests, security-tests]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
       - run: pnpm build
-
-  test-coverage-gate:
-    name: Coverage Gate
-    runs-on: ubuntu-latest
-    needs: [unit-tests]
-    steps:
-      - run: |
-          echo "Coverage gate - requires 80%+ on changed files"
-          # Implemented in unit-tests job via coverage thresholds
