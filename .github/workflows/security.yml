@@ -2,9 +2,9 @@ name: Security
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master]
   pull_request:
-    branches: [main, develop]
+    branches: [master]
   schedule:
     - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
 
@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [typescript]
+        language: [javascript-typescript]
     steps:
       - uses: actions/checkout@v4
       - uses: github/codeql-action/init@v3
@@ -45,7 +45,7 @@ jobs:
       - uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: main
+          base: master
           head: HEAD
           extra_args: --no-verification --fail
 
