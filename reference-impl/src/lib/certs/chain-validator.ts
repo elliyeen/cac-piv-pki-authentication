@@ -127,7 +127,7 @@ export async function validateCertificateChain(
       if (below > bc.pathLength) errors.push(`Path length constraint exceeded at ${ca.subject}`);
     }
     const ku = ca.getExtension(KeyUsagesExtension);
-    if (!ku || !(ku.usages & KeyUsageFlags.keyCertSign)) {
+    if (!ku || (ku.usages & KeyUsageFlags.keyCertSign) !== KeyUsageFlags.keyCertSign) {
       errors.push(`CA certificate missing keyCertSign: ${ca.subject}`);
     }
   }
