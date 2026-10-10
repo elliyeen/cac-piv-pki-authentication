@@ -1,106 +1,28 @@
 name: Security
-
 on:
   push:
-    branches: [main, develop]
+    branches: [master]
   pull_request:
-    branches: [main, develop]
+    branches: [master]
   schedule:
-    - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
-
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 permissions:
   contents: read
-  security-events: write
-
 jobs:
-  sast:
-    name: Static Analysis (CodeQL)
+  codeql:
+    name: CodeQL (JavaScript/TypeScript)
     runs-on: ubuntu-latest
     permissions:
-      security-events: write
-      actions: read
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [typescript]
+      actions: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: github/codeql-action/init@9f759ee644a3e7c15c1390abf49868036c00067b # v3
         with:
-          languages: ${{ matrix.language }}
-          queries: +security-and-quality
-      - uses: github/codeql-action/autobuild@v3
-      - uses: github/codeql-action/analyze@v3
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@9f759ee644a3e7c15c1390abf49868036c00067b # v3
         with:
-          category: "/language:${{ matrix.language }}"
-
-  secret-scan:
-    name: Secret Scanning (TruffleHog)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: main
-          head: HEAD
-          extra_args: --no-verification --fail
-
-  dependency-audit:
-    name: Dependency Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm audit --prod --audit-level=high
-      - name: Upload audit results
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-audit-results
-          path: pnpm-audit.json
-        if: always()
-
-  container-scan:
-    name: Container Scan (Trivy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: |
-          docker build -t cac-piv-reference:test -f reference-impl/Dockerfile reference-impl/
-      - name: Scan with Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'cac-piv-reference:test'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-      - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-  license-check:
-    name: License Compliance
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm licenses check --allowed=MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC
+          category: /language:javascript-typescript

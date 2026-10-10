@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { CrlCache, normalizeSerial, ParsedCrl, CrlEntry } from '../lib/certs/crl-client';
+import { CrlCache, CrlUnavailableError, normalizeSerial, ParsedCrl, CrlEntry } from './crl-client';
+
+const offline: typeof fetch = async () => { throw new Error('offline'); };
 
 describe('CRL Cache', () => {
   let cache: CrlCache;
@@ -18,7 +20,7 @@ describe('CRL Cache', () => {
   };
 
   beforeEach(() => {
-    cache = new CrlCache({ ttlHours: 24, staleWhileRevalidatePercent: 80, maxStalenessHours: 48, fetchTimeoutMs: 5000 });
+    cache = new CrlCache({ ttlHours: 24, staleWhileRevalidatePercent: 80, maxStalenessHours: 48, fetchTimeoutMs: 5000, fetchImpl: offline });
     vi.useFakeTimers();
     vi.setSystemTime(now);
   });
@@ -28,11 +30,15 @@ describe('CRL Cache', () => {
     cache.clear();
   });
 
-  it('returns false for non-revoked cert on cache miss (fail-open)', async () => {
-    // Simulate fetch failure by not mocking fetch
+  it('fails closed (throws) when the CRL cannot be fetched on a cache miss', async () => {
     const cert = { serialNumber: 'NOTREVOKED' } as any;
-    const result = await cache.isRevoked(cert, crlUrl);
-    expect(result).toBe(false); // Fail open for cache miss
+    await expect(cache.isRevoked(cert, crlUrl)).rejects.toBeInstanceOf(CrlUnavailableError);
+  });
+
+  it('fails open on a cache miss only when explicitly configured', async () => {
+    const lenient = new CrlCache({ onUnavailable: 'fail-open', fetchImpl: offline });
+    const cert = { serialNumber: 'NOTREVOKED' } as any;
+    expect(await lenient.isRevoked(cert, crlUrl)).toBe(false);
   });
 
   it('returns true for revoked cert after successful cache load', async () => {

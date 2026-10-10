@@ -1,8 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { parseCacHeaders, validateCertValidity } from '../lib/cac/headers';
-import { validateHeaderProvenance } from '../lib/cac/provenance';
-import { CrlCache } from '../lib/certs/crl-client';
-import { createCacSession, validateAndRefreshSession, revokeSession, verifyCsrfToken } from '../lib/auth/session';
+import { parseCacHeaders, validateCertValidity } from '../../lib/cac/headers';
+import { validateHeaderProvenance } from '../../lib/cac/provenance';
+import { CrlCache } from '../../lib/certs/crl-client';
+import { createCacSession, validateAndRefreshSession, revokeSession, verifyCsrfToken, CacSessionData } from '../../lib/auth/session';
+
+
+const sessions = new Map<string, CacSessionData>();
+async function createAndStore(data: Parameters<typeof createCacSession>[0], cfg: Parameters<typeof createCacSession>[1]) {
+  const r = await createCacSession(data, cfg);
+  sessions.set(r.session.id, r.session);
+  return r;
+}
+
+const offline: typeof fetch = async () => { throw new Error('offline'); };
 
 const sessionConfig = {
   idleTimeoutMinutes: 15,
@@ -63,6 +73,21 @@ describe('Red Team Scenarios (RT-01 through RT-08)', () => {
       expect(result.method).toBe('none');
     });
 
+    it('does not fall back to source IP when mTLS is required', () => {
+      const result = validateHeaderProvenance(
+        { headers: {}, ip: '10.0.0.1', socket: { authorized: false, getPeerCertificate: () => ({}) } },
+        { ...provenanceConfig, requireMtls: true }
+      );
+      expect(result.valid).toBe(false);
+    });
+
+    it('matches source IP against CIDR ranges only when mTLS is not required', () => {
+      const cfg = { ...provenanceConfig, requireMtls: false, trustedAlbCidrs: ['10.0.0.0/8'] };
+      expect(validateHeaderProvenance({ headers: {}, ip: '10.1.2.3' }, cfg).valid).toBe(true);
+      expect(validateHeaderProvenance({ headers: {}, ip: '11.0.0.1' }, cfg).valid).toBe(false);
+      expect(validateHeaderProvenance({ headers: {}, ip: 'not-an-ip' }, cfg).valid).toBe(false);
+    });
+
     it('rejects request with forged headers and untrusted mTLS cert', () => {
       const request = mockRequest({
         headers: { ...validHeaders, 'x-edipi': '9999999999' }, // Forged EDIPI
@@ -97,60 +122,17 @@ describe('Red Team Scenarios (RT-01 through RT-08)', () => {
   });
 
   describe('RT-02: EDIPI account takeover via password reset', () => {
-    it('prevents EDIPI change on existing account', () => {
-      // Simulate: user has EDIPI A, attacker tries to bind EDIPI B via password reset
-      const existingUser = { edipi: '1111111111', email: 'user@example.com' };
-      const attackerEdipi = '2222222222';
-
-      // Application logic should reject EDIPI change for existing CAC-linked account
-      expect(existingUser.edipi).toBe('1111111111');
-      expect(existingUser.edipi).not.toBe(attackerEdipi);
-      // In real impl: Prisma unique constraint on EDIPI + application-level check
-    });
-
-    it('allows EDIPI binding only on first CAC login (auto-link)', () => {
-      // New user without EDIPI - first CAC login binds EDIPI
-      const newUser = { edipi: null, email: 'new@example.com' };
-      const cacEdipi = '3333333333';
-
-      // First CAC login: bind EDIPI
-      newUser.edipi = cacEdipi;
-      expect(newUser.edipi).toBe(cacEdipi);
-
-      // Subsequent attempt with different EDIPI should fail
-      const differentEdipi = '4444444444';
-      expect(newUser.edipi).not.toBe(differentEdipi);
-    });
+    it.todo('prevents EDIPI change on an existing account. No application layer in this reference (see README, Known limitations).');
+    it.todo('binds EDIPI only on first CAC login. No application layer in this reference (see README, Known limitations).');
   });
 
   describe('RT-03: Password fallback unrestricted access', () => {
-    it('restricts password fallback to non-CAC users only', () => {
-      // CAC-enabled user should NOT be able to use password fallback
-      const cacUser = { edipi: '1234567890', cacEnabled: true, passwordHash: 'hashed' };
-      const nonCacUser = { edipi: null, cacEnabled: false, passwordHash: 'hashed' };
-
-      // Policy: password fallback only for cacEnabled === false
-      const canUsePasswordFallback = (user: typeof cacUser) => !user.cacEnabled;
-
-      expect(canUsePasswordFallback(cacUser)).toBe(false);
-      expect(canUsePasswordFallback(nonCacUser)).toBe(true);
-    });
-
-    it('rejects password login for CAC-enabled account', () => {
-      // In real impl: Better Auth credential check + CAC-enabled flag check
-      const attemptPasswordLogin = (edipi: string, cacEnabled: boolean) => {
-        if (cacEnabled) return { allowed: false, reason: 'CAC_REQUIRED' };
-        return { allowed: true };
-      };
-
-      expect(attemptPasswordLogin('1234567890', true)).toEqual({ allowed: false, reason: 'CAC_REQUIRED' });
-      expect(attemptPasswordLogin(null, false)).toEqual({ allowed: true });
-    });
+    it.todo('rejects password login for a CAC-enabled account. No application layer in this reference (see README, Known limitations).');
   });
 
   describe('RT-04: Revoked cert still authorized via stale CRL', () => {
     it('fail closed when CRL cache exceeds max staleness', async () => {
-      const cache = new CrlCache({ ttlHours: 24, staleWhileRevalidatePercent: 80, maxStalenessHours: 48, fetchTimeoutMs: 5000 });
+      const cache = new CrlCache({ ttlHours: 24, staleWhileRevalidatePercent: 80, maxStalenessHours: 48, fetchTimeoutMs: 5000, fetchImpl: offline });
       const crlUrl = 'http://crl.example.com/test.crl';
 
       const mockCrl = {
@@ -172,7 +154,7 @@ describe('Red Team Scenarios (RT-01 through RT-08)', () => {
     });
 
     it('uses stale cache within max staleness (not fail closed)', async () => {
-      const cache = new CrlCache({ ttlHours: 24, staleWhileRevalidatePercent: 80, maxStalenessHours: 48, fetchTimeoutMs: 5000 });
+      const cache = new CrlCache({ ttlHours: 24, staleWhileRevalidatePercent: 80, maxStalenessHours: 48, fetchTimeoutMs: 5000, fetchImpl: offline });
       const crlUrl = 'http://crl.example.com/test.crl';
 
       const mockCrl = {
@@ -195,37 +177,29 @@ describe('Red Team Scenarios (RT-01 through RT-08)', () => {
   });
 
   describe('RT-05: Fail-open during CRL unavailability', () => {
-    it('fail closed when CRL unavailable AND cache expired', async () => {
-      // This is RT-04 essentially - same test
-      const cache = new CrlCache({ ttlHours: 24, staleWhileRevalidatePercent: 80, maxStalenessHours: 48, fetchTimeoutMs: 5000 });
-      const crlUrl = 'http://unavailable.example.com.crl';
-
-      // No cache loaded, fetch would fail
+    it('fails closed (throws) when the CRL is unavailable and nothing is cached', async () => {
+      const cache = new CrlCache({ fetchImpl: offline });
       const cert = { serialNumber: 'ANY' } as any;
-
-      // In real impl with network fetch: would fail closed after max staleness
-      // For this test, verify the policy is fail-closed
-      const policy = 'fail-closed';
-      expect(policy).toBe('fail-closed');
+      await expect(cache.isRevoked(cert, 'http://unavailable.example.com/x.crl')).rejects.toThrow(/CRL unavailable/);
     });
 
-    it('documents fail-open/fail-closed as configurable policy', () => {
-      // In real impl: config-driven
-      const crlPolicy = process.env.CRL_UNAVAILABLE_POLICY || 'fail-closed';
-      expect(['fail-open', 'fail-closed']).toContain(crlPolicy);
+    it('fails open only when explicitly configured', async () => {
+      const cache = new CrlCache({ fetchImpl: offline, onUnavailable: 'fail-open' });
+      const cert = { serialNumber: 'ANY' } as any;
+      expect(await cache.isRevoked(cert, 'http://unavailable.example.com/x.crl')).toBe(false);
     });
   });
 
   describe('RT-06: Session fixation / IDOR in logout', () => {
     it('generates new session token on authentication (prevents fixation)', async () => {
-      const { session: session1, cookie: cookie1 } = await createCacSession({
+      const { session: session1, cookie: cookie1 } = await createAndStore({
         userId: 'user-123',
         edipi: '1234567890',
         certSerial: 'ABC123',
         certThumbprint: 'thumb1',
       }, sessionConfig);
 
-      const { session: session2, cookie: cookie2 } = await createCacSession({
+      const { session: session2, cookie: cookie2 } = await createAndStore({
         userId: 'user-123',
         edipi: '1234567890',
         certSerial: 'ABC123',
@@ -238,7 +212,7 @@ describe('Red Team Scenarios (RT-01 through RT-08)', () => {
     });
 
     it('revokes session on logout (prevents reuse)', async () => {
-      const { session, cookie } = await createCacSession({
+      const { session, cookie } = await createAndStore({
         userId: 'user-123',
         edipi: '1234567890',
         certSerial: 'ABC123',
@@ -248,126 +222,26 @@ describe('Red Team Scenarios (RT-01 through RT-08)', () => {
       const sessions = new Map([[session.id, session]]);
       await revokeSession(session.id, sessions);
 
-      const validated = await validateAndRefreshSession(cookie, sessionConfig);
+      const validated = await validateAndRefreshSession(cookie, sessions, sessionConfig);
       expect(validated).toBeNull();
     });
 
-    it('prevents IDOR by validating session ownership', async () => {
-      const { session: session1 } = await createCacSession({
+    it('rejects a validly signed cookie whose session is unknown to the server store', async () => {
+      const { cookie } = await createCacSession({
         userId: 'user-1',
         edipi: '1111111111',
         certSerial: 'A',
         certThumbprint: 'T1',
-      }, sessionConfig);
-
-      const { session: session2 } = await createCacSession({
-        userId: 'user-2',
-        edipi: '2222222222',
-        certSerial: 'B',
-        certThumbprint: 'T2',
-      }, sessionConfig);
-
-      // User 1 cannot access user 2's session data
-      expect(session1.userId).toBe('user-1');
-      expect(session2.userId).toBe('user-2');
-      expect(session1.userId).not.toBe(session2.userId);
+      }, sessionConfig); // deliberately not stored
+      expect(await validateAndRefreshSession(cookie, sessions, sessionConfig)).toBeNull();
     });
   });
 
   describe('RT-07: Privilege escalation via role mapping', () => {
-    it('enforces role mapping at authentication (pre-login)', () => {
-      // Role determined by EDIPI lookup, not user-controlled
-      const edipiToRole: Record<string, string> = {
-        '1111111111': 'ADMIN',
-        '2222222222': 'READ_ONLY',
-        '3333333333': 'USER',
-      };
-
-      const getRoleForEdipi = (edipi: string) => edipiToRole[edipi] || 'USER';
-
-      // Attacker with EDIPI 2222222222 cannot escalate to ADMIN
-      expect(getRoleForEdipi('2222222222')).toBe('READ_ONLY');
-      expect(getRoleForEdipi('2222222222')).not.toBe('ADMIN');
-
-      // Only pre-mapped EDIPI gets admin
-      expect(getRoleForEdipi('1111111111')).toBe('ADMIN');
-    });
-
-    it('rejects role claim from headers (trusts DB mapping only)', () => {
-      // Headers might include role claim - must ignore
-      const headersWithRole = { ...validHeaders, 'x-role': 'ADMIN' };
-
-      // Application uses EDIPI to look up role in DB
-      const dbRole = 'READ_ONLY'; // From DB for this EDIPI
-      const headerRole = headersWithRole['x-role'];
-
-      // Must use DB role, not header
-      expect(dbRole).toBe('READ_ONLY');
-      expect(headerRole).toBe('ADMIN');
-      expect(dbRole).not.toBe(headerRole);
-    });
+    it.todo('ignores role claims in headers and uses the server-side mapping. No application layer in this reference (see README, Known limitations).');
   });
 
   describe('RT-08: Logging gaps in error paths', () => {
-    it('logs all authentication failures with structured data', () => {
-      const logAuthEvent = (event: { type: string; success: boolean; edipi?: string; reason?: string; ip?: string }) => {
-        // In real impl: writes to AuthAuditLog table + CloudWatch
-        return { ...event, timestamp: new Date(), correlationId: 'test-correlation' };
-      };
-
-      // Failed CAC auth - missing provenance
-      const log1 = logAuthEvent({
-        type: 'CAC_LOGIN_FAILED',
-        success: false,
-        edipi: '1234567890',
-        reason: 'PROVENANCE_INVALID',
-        ip: '10.0.0.1',
-      });
-
-      expect(log1.success).toBe(false);
-      expect(log1.reason).toBe('PROVENANCE_INVALID');
-      expect(log1.correlationId).toBeDefined();
-
-      // Failed password fallback for CAC user
-      const log2 = logAuthEvent({
-        type: 'PASSWORD_FALLBACK_DENIED',
-        success: false,
-        edipi: '1234567890',
-        reason: 'CAC_REQUIRED',
-      });
-
-      expect(log2.success).toBe(false);
-      expect(log2.reason).toBe('CAC_REQUIRED');
-
-      // Revoked cert
-      const log3 = logAuthEvent({
-        type: 'CERT_REVOKED',
-        success: false,
-        edipi: '1234567890',
-        reason: 'REVOKED_IN_CRL',
-      });
-
-      expect(log3.reason).toBe('REVOKED_IN_CRL');
-    });
-
-    it('logs successful authentication with full context', () => {
-      const logAuthEvent = (event: { type: string; success: boolean; edipi: string; sessionId: string; certThumbprint: string }) => ({
-        ...event, timestamp: new Date(), correlationId: 'test-correlation'
-      });
-
-      const log = logAuthEvent({
-        type: 'CAC_LOGIN_SUCCESS',
-        success: true,
-        edipi: '1234567890',
-        sessionId: 'sess-abc123',
-        certThumbprint: 'a1b2c3d4e5f6...',
-      });
-
-      expect(log.success).toBe(true);
-      expect(log.type).toBe('CAC_LOGIN_SUCCESS');
-      expect(log.edipi).toBe('1234567890');
-      expect(log.sessionId).toBeDefined();
-      expect(log.certThumbprint).toBeDefined();
-    });
+    it.todo('logs authentication failures with structured data. No application layer in this reference (see README, Known limitations).');
   });
 });

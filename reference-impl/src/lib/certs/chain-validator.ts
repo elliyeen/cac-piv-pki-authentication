@@ -1,228 +1,200 @@
-import { X509Certificate } from '@peculiar/x509';
+import {
+  X509Certificate,
+  BasicConstraintsExtension,
+  CertificatePolicyExtension,
+  ExtendedKeyUsageExtension,
+  KeyUsageFlags,
+  KeyUsagesExtension,
+  SubjectAlternativeNameExtension,
+} from '@peculiar/x509';
 import { createHash } from 'crypto';
 
 /**
  * Certificate chain validation for environments requiring in-app PKI validation.
- * Reference implementation — production deployments may use platform validation (Option B).
+ * Reference implementation. Production deployments may use platform validation (Option B, see ADR-0001).
+ *
+ * Scope: signature, validity period, CA constraints, leaf EKU and CRL-based revocation.
+ * Not implemented: OCSP, name constraints, policy mapping, AIA chasing.
  */
 
-export interface TrustAnchor {
-  subject: string;
-  publicKey: CryptoKey;
-  cert: X509Certificate;
+const OID_CLIENT_AUTH = '1.3.6.1.5.5.7.3.2';
+const OID_PIV_I_POLICY = '2.16.840.1.101.3.2.1.3.13';
+
+/** Trust anchors are certificates the deployment has chosen to trust explicitly. */
+export type TrustAnchor = X509Certificate;
+
+export interface CrlClient {
+  /** `issuer` is the certificate that signed `cert`; its CRL is the one that applies. */
+  isRevoked(cert: X509Certificate, issuer: X509Certificate): Promise<boolean>;
+}
+
+export interface ValidationOptions {
+  /** Additional, untrusted certificates used only to build the path. */
+  intermediates?: string[];
+  checkRevocation?: boolean;
+  crlClient?: CrlClient;
+  currentTime?: Date;
+  maxDepth?: number;
 }
 
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
+  /** Leaf first, trust anchor last (when a path was found). */
   chain: X509Certificate[];
-  leaf: X509Certificate;
+}
+
+/** True when `flag` (a single power-of-two bit) is set in the key-usage bitmask. */
+const hasKeyUsage = (usages: number, flag: number): boolean => Math.floor(usages / flag) % 2 === 1;
+
+const sameCert = (a: X509Certificate, b: X509Certificate) =>
+  Buffer.from(a.rawData).equals(Buffer.from(b.rawData));
+
+async function findIssuer(
+  cert: X509Certificate,
+  candidates: X509Certificate[],
+  now: Date
+): Promise<X509Certificate | undefined> {
+  for (const candidate of candidates) {
+    if (candidate.subject !== cert.issuer) continue;
+    // Signature check decides; a matching name alone is never enough.
+    if (await cert.verify({ publicKey: candidate, signatureOnly: true }).catch(() => false)) {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 /**
- * Validate an X.509 certificate chain against configured trust anchors.
- * Implements RFC 5280 path validation.
+ * Validate an X.509 certificate chain against explicitly configured trust anchors.
+ * Fails closed: any error, missing anchor or misconfiguration yields `valid: false`.
  */
 export async function validateCertificateChain(
   certPem: string,
   trustAnchors: TrustAnchor[],
-  options: {
-    checkRevocation?: boolean;
-    crlClient?: CrlClient;
-    ocspClient?: OcspClient;
-    currentTime?: Date;
-  } = {}
+  options: ValidationOptions = {}
 ): Promise<ValidationResult> {
   const errors: string[] = [];
-  const chain: X509Certificate[] = [];
+  const now = options.currentTime ?? new Date();
+  const maxDepth = options.maxDepth ?? 10;
 
+  if (options.checkRevocation && !options.crlClient) {
+    return { valid: false, errors: ['Revocation checking requested but no CRL client configured'], chain: [] };
+  }
+
+  let leaf: X509Certificate;
+  let pool: X509Certificate[];
   try {
-    // Parse leaf certificate
-    const leaf = new X509Certificate(certPem);
-    chain.push(leaf);
+    leaf = new X509Certificate(certPem);
+    pool = (options.intermediates ?? []).map(pem => new X509Certificate(pem));
+  } catch (e) {
+    return { valid: false, errors: [`Unparseable certificate: ${(e as Error).message}`], chain: [] };
+  }
 
-    // Build chain (simplified - in production use a proper path builder)
-    let current = leaf;
-    let depth = 0;
-    const maxDepth = 10; // Prevent infinite loops
-
-    while (depth < maxDepth) {
-      // Find issuer in trust anchors
-      const issuer = trustAnchors.find(ta => ta.subject === current.issuer);
-
-      if (issuer) {
-        chain.push(issuer.cert);
-        break;
-      }
-
-      // In a real implementation, you'd fetch intermediate certs from AIA extension
-      // For this reference, we assume the chain is complete in the input or trust anchors
-      errors.push(`No trust anchor found for issuer: ${current.issuer}`);
+  // Build the path: leaf -> ... -> trust anchor
+  const chain: X509Certificate[] = [leaf];
+  let current = leaf;
+  let anchored = false;
+  for (let depth = 0; depth < maxDepth; depth++) {
+    const anchor = await findIssuer(current, trustAnchors, now);
+    if (anchor) {
+      chain.push(anchor);
+      anchored = true;
       break;
     }
+    const intermediate = await findIssuer(current, pool.filter(c => !chain.some(x => sameCert(x, c))), now);
+    if (!intermediate) break;
+    chain.push(intermediate);
+    current = intermediate;
+  }
+  if (!anchored) {
+    errors.push(`No path to a trusted anchor for issuer: ${current.issuer}`);
+    return { valid: false, errors, chain };
+  }
 
-    // Validate each certificate in chain
+  // Validity period for every certificate, including the anchor
+  for (const cert of chain) {
+    if (now < cert.notBefore) errors.push(`Certificate not yet valid: ${cert.subject}`);
+    if (now > cert.notAfter) errors.push(`Certificate expired: ${cert.subject}`);
+  }
+
+  // CA constraints for every issuer in the path (everything after the leaf)
+  for (let i = 1; i < chain.length; i++) {
+    const ca = chain[i];
+    const bc = ca.getExtension(BasicConstraintsExtension);
+    if (!bc || !bc.ca) {
+      errors.push(`Issuer is not a CA (basicConstraints): ${ca.subject}`);
+    } else if (bc.pathLength !== undefined) {
+      // CAs strictly between the leaf and this CA
+      const below = i - 1;
+      if (below > bc.pathLength) errors.push(`Path length constraint exceeded at ${ca.subject}`);
+    }
+    const ku = ca.getExtension(KeyUsagesExtension);
+    if (!ku || !hasKeyUsage(ku.usages, KeyUsageFlags.keyCertSign)) {
+      errors.push(`CA certificate missing keyCertSign: ${ca.subject}`);
+    }
+  }
+
+  // Leaf must be an end-entity authorised for client authentication
+  const leafBc = leaf.getExtension(BasicConstraintsExtension);
+  if (leafBc?.ca) errors.push(`Leaf certificate is a CA: ${leaf.subject}`);
+  const eku = leaf.getExtension(ExtendedKeyUsageExtension);
+  if (!eku || !eku.usages.some(u => String(u) === OID_CLIENT_AUTH)) {
+    errors.push('Leaf certificate missing required EKU (Client Authentication)');
+  }
+
+  // Revocation (CRL only). Every non-anchor certificate is checked.
+  if (options.checkRevocation && options.crlClient) {
     for (let i = 0; i < chain.length - 1; i++) {
       const cert = chain[i];
-      const issuer = chain[i + 1];
-
-      // Verify signature
+      let revoked: boolean;
       try {
-        const verified = await cert.verify(issuer.publicKey);
-        if (!verified) {
-          errors.push(`Signature verification failed for ${cert.subject}`);
-        }
+        revoked = await options.crlClient.isRevoked(cert, chain[i + 1]);
       } catch (e) {
-        errors.push(`Signature verification error for ${cert.subject}: ${e}`);
+        errors.push(`Revocation status unavailable for ${cert.subject}: ${(e as Error).message}`);
+        continue;
       }
-
-      // Check validity period
-      const now = options.currentTime || new Date();
-      if (now < cert.notBefore) {
-        errors.push(`Certificate not yet valid: ${cert.subject}`);
-      }
-      if (now > cert.notAfter) {
-        errors.push(`Certificate expired: ${cert.subject}`);
-      }
-
-      // Check key usage for CA certs (except leaf)
-      if (i > 0) {
-        const keyUsage = cert.extensions?.keyUsage;
-        if (keyUsage && !keyUsage.keyCertSign) {
-          errors.push(`CA certificate missing keyCertSign: ${cert.subject}`);
-        }
-        const basicConstraints = cert.extensions?.basicConstraints;
-        if (basicConstraints && basicConstraints.pathLenConstraint !== undefined) {
-          if (i - 1 > basicConstraints.pathLenConstraint) {
-            errors.push(`Path length constraint exceeded at ${cert.subject}`);
-          }
-        }
-      }
-
-      // Check extended key usage for leaf
-      if (i === 0) {
-        const eku = cert.extensions?.extKeyUsage;
-        const requiredEkus = ['1.3.6.1.5.5.7.3.2']; // Client Auth
-        const pivEku = '2.16.840.1.101.3.2.1.3.13'; // PIV-I
-        if (eku && !eku.some(o => requiredEkus.includes(o) || o === pivEku)) {
-          errors.push(`Leaf certificate missing required EKU (Client Auth or PIV-I)`);
-        }
-      }
+      if (revoked) errors.push(`Certificate revoked: ${cert.subject} (serial: ${cert.serialNumber})`);
     }
-
-    // Revocation checking (if enabled)
-    if (options.checkRevocation && options.crlClient) {
-      for (const cert of chain) {
-        const revoked = await options.crlClient.isRevoked(cert);
-        if (revoked) {
-          errors.push(`Certificate revoked: ${cert.subject} (serial: ${cert.serialNumber})`);
-        }
-      }
-    }
-
-    return {
-      valid: errors.length === 0,
-      errors,
-      chain,
-      leaf,
-    };
-  } catch (e) {
-    return {
-      valid: false,
-      errors: [`Chain validation failed: ${e}`],
-      chain: [],
-      leaf: new X509Certificate(certPem), // Will throw if invalid PEM
-    };
   }
+
+  return { valid: errors.length === 0, errors, chain };
 }
 
-/**
- * Extract EDIPI from certificate Subject DN or Subject Alternative Name.
- */
+function sanValues(cert: X509Certificate): string[] {
+  const san = cert.getExtension(SubjectAlternativeNameExtension);
+  return san ? san.names.items.map(n => `${n.type}:${n.value}`) : [];
+}
+
+/** Extract EDIPI (10 digits) from the Subject CN, falling back to a SAN entry like `1234567890@mil`. */
 export function extractEdipi(cert: X509Certificate): string | null {
-  // Try Subject DN first: CN=LAST.FIRST.EDIPI,OU=PKI,O=DoD,C=US
-  const subjectMatch = cert.subject.match(/CN=[^,]+\.(\d{10})/);
-  if (subjectMatch) return subjectMatch[1];
-
-  // Try Subject Alternative Name (otherName with Microsoft UPN or similar)
-  try {
-    const san = cert.extensions?.subjectAltName;
-    if (san) {
-      // Parse GeneralNames - simplified
-      const sanStr = san.toString();
-      const upnMatch = sanStr.match(/(\d{10})@/);
-      if (upnMatch) return upnMatch[1];
-    }
-  } catch {
-    // Ignore SAN parsing errors
+  const fromSubject = cert.subject.match(/CN=[^,]+\.(\d{10})(?:,|$)/);
+  if (fromSubject) return fromSubject[1];
+  for (const v of sanValues(cert)) {
+    const m = v.match(/(?:^|:)(\d{10})@/);
+    if (m) return m[1];
   }
-
   return null;
 }
 
-/**
- * Extract FASC-N from certificate.
- */
+/** Extract a FASC-N from the Subject or a SAN entry. */
 export function extractFascn(cert: X509Certificate): string | null {
-  // FASC-N in Subject DN: FASC-N=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-  const fascnMatch = cert.subject.match(/FASC-N=([^,]+)/);
-  if (fascnMatch) return fascnMatch[1];
-
-  // Or in SAN
-  try {
-    const san = cert.extensions?.subjectAltName;
-    if (san) {
-      const sanStr = san.toString();
-      const fascnMatch = sanStr.match(/FASC-N=([^,\s]+)/);
-      if (fascnMatch) return fascnMatch[1];
-    }
-  } catch {
-    // Ignore
+  const fromSubject = cert.subject.match(/FASC-N=([^,]+)/);
+  if (fromSubject) return fromSubject[1];
+  for (const v of sanValues(cert)) {
+    const m = v.match(/FASC-N=([^,\s]+)/);
+    if (m) return m[1];
   }
-
   return null;
 }
 
-/**
- * Get certificate SHA-256 thumbprint.
- */
+/** SHA-256 thumbprint of the DER encoding. */
 export function getThumbprint(cert: X509Certificate): string {
-  const der = cert.raw;
-  const hash = createHash('sha256').update(der).digest('hex');
-  return hash;
+  return createHash('sha256').update(Buffer.from(cert.rawData)).digest('hex');
 }
 
-/**
- * Check if certificate matches PIV-I profile.
- */
+/** True when the certificate asserts the PIV-I certificate policy. */
 export function isPivProfile(cert: X509Certificate): boolean {
-  const policyOid = '2.16.840.1.101.3.2.1.3.13';
-  const certPolicies = cert.extensions?.certificatePolicies;
-
-  if (certPolicies) {
-    return certPolicies.some(p => p.policyIdentifier === policyOid);
-  }
-
-  // Fallback: check EKU for PIV-I
-  const eku = cert.extensions?.extKeyUsage;
-  if (eku) {
-    return eku.includes(policyOid);
-  }
-
-  return false;
-}
-
-/**
- * CRL Client interface for revocation checking.
- */
-export interface CrlClient {
-  isRevoked(cert: X509Certificate): Promise<boolean>;
-  fetchCrl(url: string): Promise<Uint8Array>;
-}
-
-/**
- * OCSP Client interface for revocation checking.
- */
-export interface OcspClient {
-  check(cert: X509Certificate, issuer: X509Certificate): Promise<'good' | 'revoked' | 'unknown'>;
+  const policies = cert.getExtension(CertificatePolicyExtension)?.policies ?? [];
+  return policies.includes(OID_PIV_I_POLICY);
 }

@@ -1,7 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createCacSession, validateAndRefreshSession, revokeSession, generateCsrfToken, verifyCsrfToken, serializeSessionCookie, serializeClearedCookie } from '../lib/auth/session';
+import { createCacSession, validateAndRefreshSession, revokeSession, generateCsrfToken, verifyCsrfToken, serializeSessionCookie, serializeClearedCookie, CacSessionData } from './session';
+
+
+const sessions = new Map<string, CacSessionData>();
+async function createAndStore(data: Parameters<typeof createCacSession>[0], cfg: Parameters<typeof createCacSession>[1]) {
+  const r = await createCacSession(data, cfg);
+  sessions.set(r.session.id, r.session);
+  return r;
+}
 
 describe('CAC Session Management', () => {
+  beforeEach(() => sessions.clear());
   const config = {
     idleTimeoutMinutes: 15,
     absoluteTimeoutHours: 12,
@@ -29,7 +38,7 @@ describe('CAC Session Management', () => {
   });
 
   it('creates session with correct defaults', async () => {
-    const { session, cookie, csrfToken } = await createCacSession({
+    const { session, cookie, csrfToken } = await createAndStore({
       userId: 'user-123',
       edipi: '1234567890',
       certSerial: 'ABC123',
@@ -50,7 +59,7 @@ describe('CAC Session Management', () => {
   });
 
   it('validates and refreshes session on activity', async () => {
-    const { session, cookie } = await createCacSession({
+    const { session, cookie } = await createAndStore({
       userId: 'user-123',
       edipi: '1234567890',
       certSerial: 'ABC123',
@@ -62,14 +71,14 @@ describe('CAC Session Management', () => {
     // Advance 5 minutes
     vi.setSystemTime(new Date('2025-06-15T12:05:00Z'));
 
-    const validated = await validateAndRefreshSession(cookie, config);
+    const validated = await validateAndRefreshSession(cookie, sessions, config);
     expect(validated).not.toBeNull();
     expect(validated!.lastActivity).toEqual(new Date('2025-06-15T12:05:00Z'));
     expect(validated!.expiresAt).toEqual(new Date('2025-06-15T12:20:00Z'));
   });
 
   it('rejects expired session (idle timeout)', async () => {
-    const { cookie } = await createCacSession({
+    const { cookie } = await createAndStore({
       userId: 'user-123',
       edipi: '1234567890',
       certSerial: 'ABC123',
@@ -79,12 +88,12 @@ describe('CAC Session Management', () => {
     // Advance 20 minutes (past 15 min idle timeout)
     vi.setSystemTime(new Date('2025-06-15T12:20:00Z'));
 
-    const validated = await validateAndRefreshSession(cookie, config);
+    const validated = await validateAndRefreshSession(cookie, sessions, config);
     expect(validated).toBeNull();
   });
 
   it('rejects session past absolute timeout', async () => {
-    const { cookie } = await createCacSession({
+    const { cookie } = await createAndStore({
       userId: 'user-123',
       edipi: '1234567890',
       certSerial: 'ABC123',
@@ -94,12 +103,12 @@ describe('CAC Session Management', () => {
     // Advance 13 hours (past 12 hour absolute timeout)
     vi.setSystemTime(new Date('2025-06-16T01:00:00Z'));
 
-    const validated = await validateAndRefreshSession(cookie, config);
+    const validated = await validateAndRefreshSession(cookie, sessions, config);
     expect(validated).toBeNull();
   });
 
   it('rejects revoked session', async () => {
-    const { session, cookie } = await createCacSession({
+    const { session, cookie } = await createAndStore({
       userId: 'user-123',
       edipi: '1234567890',
       certSerial: 'ABC123',
@@ -109,7 +118,7 @@ describe('CAC Session Management', () => {
     const sessions = new Map([[session.id, session]]);
     await revokeSession(session.id, sessions);
 
-    const validated = await validateAndRefreshSession(cookie, config);
+    const validated = await validateAndRefreshSession(cookie, sessions, config);
     expect(validated).toBeNull();
   });
 

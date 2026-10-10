@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { parseCacHeaders, validateCertValidity, isCertExpiringSoon } from '../lib/cac/headers';
+import { parseCacHeaders, validateCertValidity, isCertExpiringSoon } from './headers';
 
 describe('CAC Header Parsing', () => {
   const validHeaders = {
@@ -50,8 +50,7 @@ describe('CAC Header Parsing', () => {
   });
 
   it('rejects missing required headers', () => {
-    const incompleteHeaders = { ...validHeaders };
-    delete incompleteHeaders['x-edipi'];
+    const { 'x-edipi': _omitted, ...incompleteHeaders } = validHeaders;
     expect(() => parseCacHeaders(incompleteHeaders)).toThrow();
   });
 });
@@ -89,6 +88,7 @@ describe('Certificate Validity Validation', () => {
 });
 
 describe('Certificate Expiry Warning', () => {
+  const now = new Date('2025-06-15T12:00:00Z');
   const baseMetadata = {
     edipi: '1234567890',
     subjectDn: 'CN=DOE.JOHN.1234567890,OU=PKI,O=DoD,C=US',
@@ -100,13 +100,13 @@ describe('Certificate Expiry Warning', () => {
 
   it('returns true when cert expires within threshold', () => {
     const expiringSoon = { ...baseMetadata, notAfter: new Date('2025-07-01T00:00:00Z') };
-    const result = isCertExpiringSoon(expiringSoon, 30);
+    const result = isCertExpiringSoon(expiringSoon, 30, now);
     expect(result).toBe(true);
   });
 
   it('returns false when cert expires after threshold', () => {
     const notExpiring = { ...baseMetadata, notAfter: new Date('2026-01-15T08:00:00Z') };
-    const result = isCertExpiringSoon(notExpiring, 30);
+    const result = isCertExpiringSoon(notExpiring, 30, now);
     expect(result).toBe(false);
   });
 });
