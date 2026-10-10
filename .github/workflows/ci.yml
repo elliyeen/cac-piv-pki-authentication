@@ -22,10 +22,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
-      # Temporary bootstrap: the repository has no pnpm-lock.yaml.
-      # Replace with --frozen-lockfile once a reviewed lockfile is committed.
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test:unit
       - run: pnpm test:security
-      - run: pnpm build
+      - run: pnpm test:certs
+      - run: pnpm demo

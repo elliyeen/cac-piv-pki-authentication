@@ -49,7 +49,12 @@ export function validateHeaderProvenance(
     return { valid: false, method: 'mtls', error: 'ALB certificate not in trusted list' };
   }
 
-  // Method 2: Source IP allowlist (fallback)
+  // mTLS is mandatory when configured: never fall through to weaker methods
+  if (config.requireMtls) {
+    return { valid: false, method: 'none', error: 'mTLS required but not presented' };
+  }
+
+  // Method 2: Source IP allowlist (only when mTLS is not required)
   if (request.ip && config.trustedAlbCidrs.length > 0) {
     if (config.trustedAlbCidrs.some(cidr => ipInCidr(request.ip!, cidr))) {
       return { valid: true, method: 'ip' };
@@ -71,15 +76,27 @@ export function validateHeaderProvenance(
 }
 
 /**
- * Simple CIDR matching for IPv4/IPv6.
+ * IPv4 CIDR matching. Anything that is not a well-formed IPv4 address and prefix
+ * does not match (fail closed); IPv6 is not supported in this reference.
  */
 function ipInCidr(ip: string, cidr: string): boolean {
   const [rangeIp, bitsStr] = cidr.split('/');
-  const bits = parseInt(bitsStr, 10);
+  const a = ipv4ToInt(ip);
+  const b = ipv4ToInt(rangeIp);
+  if (a === null || b === null) return false;
+  if (bitsStr === undefined) return a === b;
+  const bits = Number(bitsStr);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return ((a & mask) >>> 0) === ((b & mask) >>> 0);
+}
 
-  // Simplified - in production use a proper CIDR library like 'cidr-matcher'
-  // This is a placeholder for the reference implementation
-  return ip === rangeIp; // Exact match only in this simplified version
+function ipv4ToInt(ip: string): number | null {
+  const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return null;
+  const parts = m.slice(1).map(Number);
+  if (parts.some(n => n > 255)) return null;
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
 }
 
 /**

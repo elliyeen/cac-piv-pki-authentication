@@ -53,3 +53,5 @@ Desktop.ini
 *.prof
 *.cpuprofile
 *.heapprofile
+# Generated synthetic fixtures
+test-fixtures/

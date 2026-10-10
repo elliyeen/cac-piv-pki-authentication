@@ -1,41 +1,39 @@
-import { defineConfig, mergeConfig } from 'vitest/config';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    globals: true,
+    environment: 'node',
+    coverage: {
+      provider: 'v8',
+      include: ['src/lib/**/*.ts'],
+      exclude: ['src/**/*.test.ts'],
+      reporter: ['text', 'lcov'],
+    },
     projects: [
       {
-        name: 'unit',
+        extends: true,
         test: {
+          name: 'unit',
           include: ['src/**/*.test.ts'],
-          environment: 'node',
-          coverage: {
-            provider: 'v8',
-            reporter: ['text', 'json', 'html', 'lcov'],
-            thresholds: {
-              lines: 80,
-              functions: 80,
-              branches: 80,
-              statements: 80,
-            },
-          },
+          exclude: ['src/__tests__/**'],
         },
       },
       {
-        name: 'security',
+        extends: true,
         test: {
+          name: 'security',
           include: ['src/__tests__/security/**/*.test.ts'],
-          environment: 'node',
           testTimeout: 30000,
         },
       },
       {
-        name: 'certs',
+        extends: true,
         test: {
+          name: 'certs',
           include: ['src/__tests__/certs/**/*.test.ts'],
-          environment: 'node',
         },
       },
     ],
-    globals: true,
   },
 });

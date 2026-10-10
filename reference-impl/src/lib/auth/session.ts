@@ -77,10 +77,11 @@ export async function createCacSession(
 
 /**
  * Validate and refresh session on authenticated request.
- * Returns updated session or null if invalid/expired/revoked.
+ * Returns updated session or null if invalid/expired/revoked/unknown to the store.
  */
 export async function validateAndRefreshSession(
   cookieValue: string,
+  sessions: Map<string, CacSessionData>,
   config: Partial<SessionConfig> = {}
 ): Promise<CacSessionData | null> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
@@ -91,8 +92,10 @@ export async function validateAndRefreshSession(
 
     const now = new Date();
 
-    // Check revoked
-    if (session.revokedAt) return null;
+    // The server-side store is authoritative: the cookie alone cannot prove the
+    // session has not been revoked. Unknown or revoked sessions are rejected.
+    const stored = sessions.get(session.id);
+    if (!stored || stored.revokedAt) return null;
 
     // Check absolute timeout
     const absoluteExpiry = new Date(session.createdAt.getTime() + cfg.absoluteTimeoutHours * 3600 * 1000);

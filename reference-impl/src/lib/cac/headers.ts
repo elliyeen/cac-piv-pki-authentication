@@ -86,8 +86,10 @@ export function parseCacHeaders(headers: Record<string, string | undefined>): Pa
 /**
  * Validate certificate is currently valid (not expired, not before valid).
  */
-export function validateCertValidity(metadata: ParsedCertMetadata): { valid: boolean; reason?: string } {
-  const now = new Date();
+export function validateCertValidity(
+  metadata: ParsedCertMetadata,
+  now: Date = new Date()
+): { valid: boolean; reason?: string } {
 
   if (now < metadata.notBefore) {
     return { valid: false, reason: 'CERT_NOT_YET_VALID' };
@@ -103,8 +105,12 @@ export function validateCertValidity(metadata: ParsedCertMetadata): { valid: boo
 /**
  * Check if certificate is expiring soon (for proactive renewal notices).
  */
-export function isCertExpiringSoon(metadata: ParsedCertMetadata, daysThreshold = 30): boolean {
-  const threshold = new Date();
+export function isCertExpiringSoon(
+  metadata: ParsedCertMetadata,
+  daysThreshold = 30,
+  now: Date = new Date()
+): boolean {
+  const threshold = new Date(now);
   threshold.setDate(threshold.getDate() + daysThreshold);
   return metadata.notAfter < threshold;
 }

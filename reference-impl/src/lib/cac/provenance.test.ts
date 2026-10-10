@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { validateHeaderProvenance, generateRequestFingerprint } from '../lib/cac/provenance';
+import { validateHeaderProvenance, generateRequestFingerprint } from './provenance';
 
 describe('Header Provenance Validation', () => {
   const mockRequest = (overrides: Partial<{
