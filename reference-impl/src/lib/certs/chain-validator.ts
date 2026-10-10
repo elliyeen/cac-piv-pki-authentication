@@ -44,6 +44,9 @@ export interface ValidationResult {
   chain: X509Certificate[];
 }
 
+/** True when `flag` (a single power-of-two bit) is set in the key-usage bitmask. */
+const hasKeyUsage = (usages: number, flag: number): boolean => Math.floor(usages / flag) % 2 === 1;
+
 const sameCert = (a: X509Certificate, b: X509Certificate) =>
   Buffer.from(a.rawData).equals(Buffer.from(b.rawData));
 
@@ -127,7 +130,7 @@ export async function validateCertificateChain(
       if (below > bc.pathLength) errors.push(`Path length constraint exceeded at ${ca.subject}`);
     }
     const ku = ca.getExtension(KeyUsagesExtension);
-    if (!ku || (ku.usages & KeyUsageFlags.keyCertSign) !== KeyUsageFlags.keyCertSign) {
+    if (!ku || !hasKeyUsage(ku.usages, KeyUsageFlags.keyCertSign)) {
       errors.push(`CA certificate missing keyCertSign: ${ca.subject}`);
     }
   }
