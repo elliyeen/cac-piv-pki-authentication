@@ -2,7 +2,7 @@
 flowchart LR
   a["Claude Code<br/>builds on a feature branch<br/>AI engineering"]:::ai
   pr["Draft pull request<br/>one reversible change<br/>software engineering"]:::sw
-  ci["CI gates<br/>typecheck, unit + security tests,<br/>CodeQL, secret scan, dependency audit<br/>software engineering"]:::sw
+  ci["CI gates<br/>typecheck, unit + security tests, CodeQL<br/>(the private lab adds more gates)<br/>software engineering"]:::sw
   cx["Codex review<br/>independent context, exact commit,<br/>findings with file and line<br/>AI engineering"]:::ai
   fix["Claude fixes findings<br/>a new commit needs a new review"]:::ai
   h["Human approval<br/>the owner signs the review request<br/>and the merge; no self-approval"]:::gate

@@ -9,7 +9,7 @@ Status of this **public reference** only. Nothing here is a commitment, a schedu
 | Header provenance: mTLS pin | Implemented, tested | |
 | Header provenance: IPv4 allowlist | Implemented, tested, **weaker mode** | A network position does not authenticate who set a header |
 | Sessions: idle/absolute timeout, CSRF, revocation | Implemented, tested | In-memory store only |
-| Audit event builder | Implemented, tested | Redacted, whitelisted; no sink |
+| Audit event builder and sink | Planned | Not in the committed code; no audit logging exists in this repository today |
 | OCSP | Planned | |
 | Authenticated gateway assertion (signed identity, freshness, replay protection) | Planned | Replaces network-position provenance for non-mTLS deployments. The IPv4 allowlist mode is expected to be demoted or removed once this exists. |
 | Durable session store and audit sink reference | Planned | Interfaces only today |

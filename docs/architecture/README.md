@@ -16,7 +16,7 @@ This is the public, educational reference. A separate private engineering lab ex
 
 ![System and data architecture](01-system-and-data.png)
 
-The validation library is reusable at whichever boundary performs certificate validation (a gateway, or the application itself). The database and audit sink are interfaces only; no persistence is implemented here. Source: [`01-system-and-data.mmd`](01-system-and-data.mmd) · [SVG](01-system-and-data.svg)
+The validation library is reusable at whichever boundary performs certificate validation (a gateway, or the application itself). Persistence and audit logging are not implemented here; sessions use an in-memory store. Source: [`01-system-and-data.mmd`](01-system-and-data.mmd) · [SVG](01-system-and-data.svg)
 
 ## 2. CAC login sequence
 
@@ -45,7 +45,7 @@ Source: [`03-trust-boundaries.mmd`](03-trust-boundaries.mmd) · [SVG](03-trust-b
 
 Claude builds, CI gates, Codex reviews the exact commit independently, a human approves; deployment is never automated by this process. A new commit after a review needs a new review. Source: [`04-delivery-workflow.mmd`](04-delivery-workflow.mmd) · [SVG](04-delivery-workflow.svg)
 
-CI in this repository today: typecheck, unit, security and certificate tests, the offline demo, and CodeQL. The independent-review and approval steps are a development process, not something this repository enforces; branch protection and required reviews are repository settings.
+CI in this repository today: typecheck, unit, security and certificate tests, the offline demo, and CodeQL. (No secret scanning, container scanning or dependency audit is configured here; see the README.) The independent-review and approval steps are a development process, not something this repository enforces; branch protection and required reviews are repository settings.
 
 ## Regenerating
 

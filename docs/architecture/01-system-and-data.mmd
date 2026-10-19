@@ -13,12 +13,12 @@ flowchart TB
   subgraph app["Application boundary"]
     prov["Provenance check<br/>mTLS pin, or IPv4 allowlist (weaker)<br/><b>IMPLEMENTED</b>"]:::impl
     sess["Sessions<br/>idle + absolute timeout, CSRF, revocation<br/><b>IMPLEMENTED</b> (in-memory store)"]:::impl
-    audit["Audit event builder<br/>whitelisted, redacted<br/><b>IMPLEMENTED</b>"]:::impl
+    audit["Audit events<br/>no builder or sink in this repository<br/><b>PLANNED</b>"]:::plan
     ui["UI, role mapping, account linking<br/><b>PLANNED</b> (not in this repository)"]:::plan
   end
 
   subgraph data["Data and audit"]
-    db[("Database<br/>users, roles, sessions, audit<br/><b>PLANNED</b> (interface only)")]:::plan
+    db[("Database<br/>users, roles, sessions, audit<br/><b>PLANNED</b> (not implemented)")]:::plan
     sink["Audit sink / SIEM<br/><b>PLANNED</b>"]:::plan
   end
 
@@ -28,7 +28,7 @@ flowchart TB
   gw -->|"request + identity headers"| prov
   prov --> sess
   prov --> audit
-  sess -.->|"store contract"| db
+  sess -.->|"future durable store"| db
   audit -.-> sink
   ui -.-> db
   gw -.->|"uses"| cert
