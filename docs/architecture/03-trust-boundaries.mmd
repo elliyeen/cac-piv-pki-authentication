@@ -1,0 +1,35 @@
+%%{init: {'theme':'base','themeVariables':{'background':'#ffffff','primaryColor':'#ffffff','primaryTextColor':'#111827','primaryBorderColor':'#374151','lineColor':'#111827','secondaryColor':'#f3f4f6','tertiaryColor':'#ffffff','fontFamily':'Arial, Helvetica, sans-serif','fontSize':'16px','noteBkgColor':'#f3f4f6','noteTextColor':'#111827','noteBorderColor':'#374151','actorBkg':'#dbeafe','actorBorder':'#1d4ed8','actorTextColor':'#111827','signalColor':'#111827','signalTextColor':'#111827'}}}%%
+flowchart LR
+  subgraph z0["Zone 0 - untrusted: internet, browsers, any HTTP header"]
+    c["Client<br/>can send any header, including x-edipi"]:::neutral
+  end
+
+  subgraph z1["Zone 1 - gateway: the only component that may assert identity"]
+    g["Trusted gateway<br/>terminates client-certificate TLS<br/>deletes inbound identity headers<br/>validates the certificate and revocation<br/><b>SIMULATED</b>"]:::sim
+  end
+
+  subgraph z2["Zone 2 - application origin: reachable only from the gateway"]
+    p["Provenance verification<br/>mTLS pin, or IPv4 allowlist (weaker)<br/>fails closed, runs before parsing headers<br/><b>IMPLEMENTED</b>"]:::impl
+    s["Session + CSRF + revocation<br/><b>IMPLEMENTED</b>"]:::impl
+  end
+
+  subgraph z3["Zone 3 - data: application-only credentials"]
+    d[("Database and audit sink<br/><b>PLANNED</b>")]:::plan
+  end
+
+  r["Revocation source<br/>signed CRLs, bounded staleness<br/><b>SIMULATED</b> in tests"]:::sim
+
+  c -->|"untrusted request"| g
+  g -->|"identity headers + proof of origin"| p
+  p --> s
+  s -.-> d
+  g -->|"verify CRL signature, fail closed"| r
+
+  classDef impl fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#111827
+  classDef sim fill:#ffffff,stroke:#1d4ed8,stroke-width:2px,stroke-dasharray:6 4,color:#111827
+  classDef plan fill:#f3f4f6,stroke:#6b7280,stroke-width:2px,stroke-dasharray:2 4,color:#111827
+  classDef neutral fill:#ffffff,stroke:#374151,stroke-width:1.5px,color:#111827
+  style z0 fill:#ffffff,stroke:#6b7280,stroke-dasharray:4 4
+  style z1 fill:#ffffff,stroke:#6b7280,stroke-dasharray:4 4
+  style z2 fill:#ffffff,stroke:#6b7280,stroke-dasharray:4 4
+  style z3 fill:#ffffff,stroke:#6b7280,stroke-dasharray:4 4

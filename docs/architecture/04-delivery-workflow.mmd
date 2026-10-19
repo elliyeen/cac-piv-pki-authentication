@@ -1,0 +1,26 @@
+%%{init: {'theme':'base','themeVariables':{'background':'#ffffff','primaryColor':'#ffffff','primaryTextColor':'#111827','primaryBorderColor':'#374151','lineColor':'#111827','secondaryColor':'#f3f4f6','tertiaryColor':'#ffffff','fontFamily':'Arial, Helvetica, sans-serif','fontSize':'16px','noteBkgColor':'#f3f4f6','noteTextColor':'#111827','noteBorderColor':'#374151','actorBkg':'#dbeafe','actorBorder':'#1d4ed8','actorTextColor':'#111827','signalColor':'#111827','signalTextColor':'#111827'}}}%%
+flowchart LR
+  a["Claude Code<br/>builds on a feature branch<br/>AI engineering"]:::ai
+  pr["Draft pull request<br/>one reversible change<br/>software engineering"]:::sw
+  ci["CI gates<br/>typecheck, unit + security tests,<br/>CodeQL, secret scan, dependency audit<br/>software engineering"]:::sw
+  cx["Codex review<br/>independent context, exact commit,<br/>findings with file and line<br/>AI engineering"]:::ai
+  fix["Claude fixes findings<br/>a new commit needs a new review"]:::ai
+  h["Human approval<br/>the owner signs the review request<br/>and the merge; no self-approval"]:::gate
+  m["Merge"]:::gate
+  dep["Deployment<br/>manual and customer-authorized<br/>never automated here"]:::gate
+
+  a --> pr --> ci
+  ci -->|"all green"| cx
+  ci -->|"any failure blocks"| a
+  cx -->|"findings"| fix --> ci
+  cx -->|"no open critical or high"| h --> m --> dep
+
+  subgraph key["Legend"]
+    k1["AI engineering"]:::ai
+    k2["Software engineering"]:::sw
+    k3["Human gate"]:::gate
+  end
+  classDef ai fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#111827
+  classDef sw fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#111827
+  classDef gate fill:#ffffff,stroke:#374151,stroke-width:2px,color:#111827
+  style key fill:#ffffff,stroke:#d1d5db

@@ -1,0 +1,44 @@
+%%{init: {'theme':'base','themeVariables':{'background':'#ffffff','primaryColor':'#ffffff','primaryTextColor':'#111827','primaryBorderColor':'#374151','lineColor':'#111827','secondaryColor':'#f3f4f6','tertiaryColor':'#ffffff','fontFamily':'Arial, Helvetica, sans-serif','fontSize':'16px','noteBkgColor':'#f3f4f6','noteTextColor':'#111827','noteBorderColor':'#374151','actorBkg':'#dbeafe','actorBorder':'#1d4ed8','actorTextColor':'#111827','signalColor':'#111827','signalTextColor':'#111827'}}}%%
+flowchart TB
+  user["User<br/>smart card + browser"]:::neutral
+
+  subgraph edge["Gateway boundary (not in this repository)"]
+    gw["Trusted gateway<br/>client-certificate TLS<br/>identity assertion<br/><b>SIMULATED</b> by the test harness"]:::sim
+  end
+
+  subgraph lib["Validation library (this repository)"]
+    cert["Certificate chain + signed-CRL validation<br/>used by the gateway or the app<br/><b>IMPLEMENTED</b>"]:::impl
+  end
+
+  subgraph app["Application boundary"]
+    prov["Provenance check<br/>mTLS pin, or IPv4 allowlist (weaker)<br/><b>IMPLEMENTED</b>"]:::impl
+    sess["Sessions<br/>idle + absolute timeout, CSRF, revocation<br/><b>IMPLEMENTED</b> (in-memory store)"]:::impl
+    audit["Audit event builder<br/>whitelisted, redacted<br/><b>IMPLEMENTED</b>"]:::impl
+    ui["UI, role mapping, account linking<br/><b>PLANNED</b> (not in this repository)"]:::plan
+  end
+
+  subgraph data["Data and audit"]
+    db[("Database<br/>users, roles, sessions, audit<br/><b>PLANNED</b> (interface only)")]:::plan
+    sink["Audit sink / SIEM<br/><b>PLANNED</b>"]:::plan
+  end
+
+  crl["CRL endpoint<br/><b>SIMULATED</b> in tests"]:::sim
+
+  user -->|"client certificate"| gw
+  gw -->|"request + identity headers"| prov
+  prov --> sess
+  prov --> audit
+  sess -.->|"store contract"| db
+  audit -.-> sink
+  ui -.-> db
+  gw -.->|"uses"| cert
+  cert -->|"fetch + verify signature"| crl
+
+  classDef impl fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#111827
+  classDef sim fill:#ffffff,stroke:#1d4ed8,stroke-width:2px,stroke-dasharray:6 4,color:#111827
+  classDef plan fill:#f3f4f6,stroke:#6b7280,stroke-width:2px,stroke-dasharray:2 4,color:#111827
+  classDef neutral fill:#ffffff,stroke:#374151,stroke-width:2px,color:#111827
+  style edge fill:#ffffff,stroke:#6b7280,stroke-dasharray:4 4
+  style lib fill:#ffffff,stroke:#6b7280,stroke-dasharray:4 4
+  style app fill:#ffffff,stroke:#6b7280,stroke-dasharray:4 4
+  style data fill:#ffffff,stroke:#6b7280,stroke-dasharray:4 4
