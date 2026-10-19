@@ -22,6 +22,24 @@ A clean-room TypeScript library and test suite for the application side of smart
 
 Run `pnpm test` to see the current counts rather than trusting this table.
 
+## Architecture
+
+Each box is labelled **IMPLEMENTED**, **SIMULATED** or **PLANNED**; blue is software engineering, green is AI engineering, neutral is boundaries and human gates. Details, sources and the threat table are in [docs/architecture](docs/architecture/README.md).
+
+**System and data**
+![System and data architecture](docs/architecture/01-system-and-data.png)
+
+**CAC login sequence**
+![CAC login sequence](docs/architecture/02-login-sequence.png)
+
+**Security trust boundaries**
+![Security trust boundaries](docs/architecture/03-trust-boundaries.png)
+
+**Delivery workflow (Claude, CI, Codex, human approval)**
+![Delivery workflow](docs/architecture/04-delivery-workflow.png)
+
+More: [ROADMAP](ROADMAP.md) · [EVIDENCE](EVIDENCE.md) · [DEMO](DEMO.md) · [SECURITY](SECURITY.md)
+
 ## Try it (about five minutes)
 
 Prerequisites: Node.js 20+ and pnpm 9+. No database or Docker needed.

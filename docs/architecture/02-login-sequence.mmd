@@ -1,0 +1,37 @@
+%%{init: {'theme':'base','themeVariables':{'background':'#ffffff','primaryColor':'#ffffff','primaryTextColor':'#111827','primaryBorderColor':'#374151','lineColor':'#111827','secondaryColor':'#f3f4f6','tertiaryColor':'#ffffff','fontFamily':'Arial, Helvetica, sans-serif','fontSize':'16px','noteBkgColor':'#f3f4f6','noteTextColor':'#111827','noteBorderColor':'#374151','actorBkg':'#dbeafe','actorBorder':'#1d4ed8','actorTextColor':'#111827','signalColor':'#111827','signalTextColor':'#111827'}}}%%
+sequenceDiagram
+  autonumber
+  participant B as Browser + smart card
+  box Gateway boundary - SIMULATED
+    participant G as Trusted gateway
+  end
+  box Application - IMPLEMENTED
+    participant A as App: provenance, sessions
+  end
+  participant S as Session store (in-memory today, PLANNED: durable)
+  participant L as Audit sink (PLANNED)
+
+  B->>G: TLS handshake with client certificate
+  G->>G: Validate chain, key usage, client-auth EKU, validity
+  G->>G: Check signed CRL (unknown or stale means deny)
+  alt certificate rejected
+    G-->>B: 401 (the request never reaches the app)
+  else certificate accepted
+    G->>A: Request + identity headers (stripped and re-added by the gateway)
+    A->>A: Verify provenance BEFORE reading any identity header
+    alt provenance not proven
+      A->>L: audit: spoof attempt (redacted)
+      A-->>B: 401
+    else provenance proven
+      A->>S: Create session (id, CSRF token, idle + absolute expiry)
+      A-->>B: Set-Cookie HttpOnly, Secure, SameSite + CSRF token
+    end
+  end
+
+  Note over B,A: Later requests
+  B->>A: Request with session cookie
+  A->>S: Validate, slide idle window, reissue cookie
+  B->>A: Logout with CSRF token
+  A->>S: Revoke session
+  B->>A: Replay of the old cookie
+  A-->>B: 401 (revoked)
